@@ -8,6 +8,7 @@ https://www.github.com/kyubyong/transformer
 
 from __future__ import print_function
 import tensorflow as tf
+import numpy as np
 
 def normalize(inputs, 
               epsilon = 1e-8,
@@ -41,6 +42,7 @@ def normalize(inputs,
 def embedding(inputs, 
               vocab_size, 
               num_units, 
+              lookup_table=None,
               zero_pad=True, 
               scale=True,
               scope="embedding", 
@@ -102,13 +104,14 @@ def embedding(inputs,
     ```    
     '''
     with tf.variable_scope(scope, reuse=reuse):
-        lookup_table = tf.get_variable('lookup_table',
-                                       dtype=tf.float32,
-                                       shape=[vocab_size, num_units],
-                                       initializer=tf.contrib.layers.xavier_initializer())
-        if zero_pad:
-            lookup_table = tf.concat((tf.zeros(shape=[1, num_units]),
-                                      lookup_table[1:, :]), 0)
+        if lookup_table == None:
+            lookup_table = tf.get_variable('lookup_table',
+                                           dtype=tf.float32,
+                                           shape=[vocab_size, num_units],
+                                           initializer=tf.contrib.layers.xavier_initializer())
+            if zero_pad:
+                lookup_table = tf.concat((tf.zeros(shape=[1, num_units]),
+                                          lookup_table[1:, :]), 0)
         outputs = tf.nn.embedding_lookup(lookup_table, inputs)
         
         if scale:
@@ -144,7 +147,7 @@ def positional_encoding(inputs,
 
         # First part of the PE function: sin and cos argument
         position_enc = np.array([
-            [pos / np.power(10000, 2.*i/num_units) for i in range(num_units)]
+            [1.0*pos / np.power(10000, (i-i%2)/num_units) for i in range(num_units)]
             for pos in range(T)])
 
         # Second part, apply the cosine to even columns and sin to odds.
@@ -152,7 +155,7 @@ def positional_encoding(inputs,
         position_enc[:, 1::2] = np.cos(position_enc[:, 1::2])  # dim 2i+1
 
         # Convert to a tensor
-        lookup_table = tf.convert_to_tensor(position_enc)
+        lookup_table = tf.convert_to_tensor(position_enc, dtype=tf.float32)
 
         if zero_pad:
             lookup_table = tf.concat((tf.zeros(shape=[1, num_units]),
@@ -168,6 +171,8 @@ def positional_encoding(inputs,
 
 def multihead_attention(queries, 
                         keys, 
+                        query_masks,
+                        key_masks,
                         num_units=None, 
                         num_heads=8, 
                         dropout_rate=0,
@@ -214,7 +219,7 @@ def multihead_attention(queries,
         outputs = outputs / (K_.get_shape().as_list()[-1] ** 0.5)
         
         # Key Masking
-        key_masks = tf.sign(tf.abs(tf.reduce_sum(keys, axis=-1))) # (N, T_k)
+        #key_masks = tf.sign(tf.abs(tf.reduce_sum(keys, axis=-1))) # (N, T_k)
         key_masks = tf.tile(key_masks, [num_heads, 1]) # (h*N, T_k)
         key_masks = tf.tile(tf.expand_dims(key_masks, 1), [1, tf.shape(queries)[1], 1]) # (h*N, T_q, T_k)
         
@@ -225,6 +230,8 @@ def multihead_attention(queries,
         if causality:
             diag_vals = tf.ones_like(outputs[0, :, :]) # (T_q, T_k)
             tril = tf.contrib.linalg.LinearOperatorTriL(diag_vals).to_dense() # (T_q, T_k)
+            ## If LinearOperatorTriL is deprecated, using this:
+            ## tril = tf.linalg.LinearOperatorLowerTriangular(diag_vals).to_dense() # (T_q, T_k)
             masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(outputs)[0], 1, 1]) # (h*N, T_q, T_k)
    
             paddings = tf.ones_like(masks)*(-2**32+1)
@@ -234,10 +241,10 @@ def multihead_attention(queries,
         outputs = tf.nn.softmax(outputs) # (h*N, T_q, T_k)
          
         # Query Masking
-        query_masks = tf.sign(tf.abs(tf.reduce_sum(queries, axis=-1))) # (N, T_q)
+        #query_masks = tf.sign(tf.abs(tf.reduce_sum(queries, axis=-1))) # (N, T_q)
         query_masks = tf.tile(query_masks, [num_heads, 1]) # (h*N, T_q)
         query_masks = tf.tile(tf.expand_dims(query_masks, -1), [1, 1, tf.shape(keys)[1]]) # (h*N, T_q, T_k)
-        outputs *= query_masks # broadcasting. (N, T_q, C)
+        outputs *= query_masks # broadcasting. (h*N, T_q, T_k)
           
         # Dropouts
         outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
