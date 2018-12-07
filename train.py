@@ -59,7 +59,7 @@ class Graph():
                         self.enc = tf.concat([self.enc, 
                             tf.nn.embedding_lookup(self.case_lookup_table, case)], -1)
 
-                    ## Pos embedding
+                    ## POS embedding
                     if hp.pos_size > 0:
                         self.pos_lookup_table = tf.get_variable('pos_lookup_table',
                                 dtype=tf.float32,
@@ -92,7 +92,7 @@ class Graph():
                                                 training=tf.convert_to_tensor(is_training))
                     
                     ## Fit embedding 
-                    self.enc = tf.layers.dense(self.enc, hp.hidden_units, activation=tf.nn.relu)
+                    self.enc = tf.layers.dense(self.enc, hp.hidden_units, kernel_initializer=tf.truncated_normal_initializer(0.0, 0.1), activation=tf.nn.relu)
 
                     ## Blocks
                     for i in range(hp.num_blocks):
@@ -146,7 +146,7 @@ class Graph():
                                                 training=tf.convert_to_tensor(is_training))
                    
                     ## Fit embedding 
-                    self.dec = tf.layers.dense(self.dec, hp.hidden_units, activation=tf.nn.relu)
+                    self.dec = tf.layers.dense(self.dec, hp.hidden_units, kernel_initializer=tf.truncated_normal_initializer(0.0, 0.1), activation=tf.nn.relu)
 
                     ## Blocks
                     for i in range(hp.num_blocks):
@@ -183,7 +183,7 @@ class Graph():
                                                    reuse=reuse_variables)
                     
                 # Final linear projection
-                self.logits = tf.layers.dense(self.dec, len(w2i))
+                self.logits = tf.layers.dense(self.dec, len(w2i),kernel_initializer=tf.truncated_normal_initializer(0.0, 0.1))
                 self.preds = tf.to_int32(tf.arg_max(self.logits, dimension=-1))
                 self.istarget = tf.to_float(tf.not_equal(y, 0))
                 self.acc = tf.reduce_sum(tf.to_float(tf.equal(self.preds, y))*self.istarget)/ (tf.reduce_sum(self.istarget))
@@ -377,61 +377,61 @@ if __name__ == '__main__':
     
     # Construct graph
     g = Graph("train"); print("Graph loaded")
-    fw = open('preds.txt', 'w')
     
     # Start session
-    sv = tf.train.Supervisor(graph=g.graph, 
-                             logdir=hp.logdir,
-                             summary_op=None,
-                             ready_op=None,
-                             save_model_secs=0)
-
     config = tf.ConfigProto()
     config.allow_soft_placement = True
     config.gpu_options.allow_growth = True
-    with sv.managed_session(config=config) as sess, g.graph.as_default():
-        print ('all variables', len(tf.global_variables()))
-        print ('trainable variables', len(tf.trainable_variables()))
-        print ('params size', get_num_params())
+    with g.graph.as_default():
+        sv = tf.train.Supervisor(graph=g.graph,
+                             logdir=hp.logdir,
+                             summary_op=None,
+                             save_model_secs=0)
 
-        with open('trainable_variables.tsv', 'w') as fw:     
-            for var in tf.trainable_variables():    
-                fw.write(var.op.name + '\t' + var.device + '\t' + ','.join(map(str, var.shape.as_list())) + '\n')
+        with sv.managed_session(config=config) as sess:
+            print ('all variables', len(tf.global_variables()))
+            print ('trainable variables', len(tf.trainable_variables()))
+            #print ('uninitialized_variables', len(sess.run(tf.report_uninitialized_variables())))
+            print ('params size', get_num_params())
 
-        for epoch in range(1, hp.num_epochs+1): 
-            if sv.should_stop(): break
+            with open('trainable_variables.tsv', 'w') as fw:     
+                for var in tf.trainable_variables():    
+                    fw.write(var.op.name + '\t' + var.device + '\t' + ','.join(map(str, var.shape.as_list())) + '\n')
 
-            # each epoch runs g.num_batch batchs
-            num_batch = 10000  
-            val_every_steps = hp.val_every_batchs // hp.num_gpus
+            for epoch in range(1, hp.num_epochs+1): 
+                if sv.should_stop(): break
 
-            for step in tqdm(range(num_batch/hp.num_gpus), total=num_batch/hp.num_gpus, ncols=70, leave=False, unit='b'):
-                gs = sess.run(g.global_step)   
+                # each epoch runs g.num_batch batchs
+                num_batch = 10000  
+                val_every_steps = hp.val_every_batchs // hp.num_gpus
 
-                if gs % hp.summary_every_steps == 0:
-                    _, summary, srcs, tgts, preds = sess.run([g.apply_gradient_op, 
-                                           g.summary_op, 
-                                           g.xs[:5],
-                                           g.ys[:5],
-                                           g.tower_preds[:5]])
-                    sv.summary_computed(sess, summary)
-                    ## preds
-                    for n in range(5):
-                        fw.write('src - ' + ' '.join([i2w[idx] for idx in srcs[n]]) + '\n')
-                        fw.write('tgt - ' + ' '.join([i2w[idx] for idx in tgts[n]]) + '\n')
-                        fw.write('got - ' + ' '.join([i2w[idx] for idx in preds[n]]) + '\n\n')
+                for step in tqdm(range(num_batch/hp.num_gpus), total=num_batch/hp.num_gpus, ncols=70, leave=False, unit='b'):
+                    gs = sess.run(g.global_step)   
 
-                else:
-                    sess.run(g.apply_gradient_op)
+                    if gs % hp.summary_every_steps == 0:
+                        _, summary, srcs, tgts, preds = sess.run([g.apply_gradient_op, 
+                                               g.summary_op, 
+                                               g.xs,
+                                               g.ys,
+                                               g.tower_preds])
+                        sv.summary_computed(sess, summary)
+                        ## preds
+                        with codecs.open('preds.txt', 'a', 'utf-8') as fw:
+                            for n in range(5):
+                                fw.write('src - ' + ' '.join([i2w[idx] for idx in srcs[n]]) + '\n')
+                                fw.write('tgt - ' + ' '.join([i2w[idx] for idx in tgts[n]]) + '\n')
+                                fw.write('got - ' + ' '.join([i2w[idx] for idx in preds[n]]) + '\n\n')
 
-                if gs != 0 and gs % val_every_steps == 0:
-                    sv.saver.save(sess, hp.logdir + '/model_epoch_%02d_gs_%d' % (epoch, gs))
-                    print ('Validating...')
-                    validate(g, sess, 'model_epoch_%02d_gs_%d' % (epoch, gs))
-                    print ('Inferencing...')
-                    inference(g, sess, 'inference_epoch_%02d_gs_%d' % (epoch, gs))
-    
-    fw.close()
-    print("Done")    
-    
+                    else:
+                        sess.run(g.apply_gradient_op)
+
+                    if gs != 0 and gs % val_every_steps == 0:
+                        sv.saver.save(sess, hp.logdir + '/model_epoch_%02d_gs_%d' % (epoch, gs))
+                        print ('Validating...')
+                        validate(g, sess, 'model_epoch_%02d_gs_%d' % (epoch, gs))
+                        print ('Inferencing...')
+                        inference(g, sess, 'inference_epoch_%02d_gs_%d' % (epoch, gs))
+        
+        print("Done")    
+        
 

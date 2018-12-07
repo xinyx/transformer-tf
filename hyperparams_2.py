@@ -36,7 +36,7 @@ class Hyperparams:
     emb_size = 300
     glove_path = "corpora/glove.840B.300d.txt"
 
-    hidden_units = 768 # alias = C
+    hidden_units = 512 # alias = C
     num_blocks = 6 # number of encoder/decoder blocks
     num_epochs = 20
     num_heads = 8

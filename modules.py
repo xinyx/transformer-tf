@@ -112,6 +112,7 @@ def embedding(inputs,
             if zero_pad:
                 lookup_table = tf.concat((tf.zeros(shape=[1, num_units]),
                                           lookup_table[1:, :]), 0)
+
         outputs = tf.nn.embedding_lookup(lookup_table, inputs)
         
         if scale:
@@ -203,9 +204,9 @@ def multihead_attention(queries,
             num_units = queries.get_shape().as_list[-1]
         
         # Linear projections
-        Q = tf.layers.dense(queries, num_units, activation=tf.nn.relu) # (N, T_q, C)
-        K = tf.layers.dense(keys, num_units, activation=tf.nn.relu) # (N, T_k, C)
-        V = tf.layers.dense(keys, num_units, activation=tf.nn.relu) # (N, T_k, C)
+        Q = tf.layers.dense(queries, num_units, kernel_initializer=tf.truncated_normal_initializer(0,0.1), activation=tf.nn.relu) # (N, T_q, C)
+        K = tf.layers.dense(keys, num_units,kernel_initializer=tf.truncated_normal_initializer(0,0.1), activation=tf.nn.relu) # (N, T_k, C)
+        V = tf.layers.dense(keys, num_units,kernel_initializer=tf.truncated_normal_initializer(0,0.1), activation=tf.nn.relu) # (N, T_k, C)
         
         # Split and concat
         Q_ = tf.concat(tf.split(Q, num_heads, axis=2), axis=0) # (h*N, T_q, C/h) 
